@@ -54,18 +54,65 @@ def read_first_markdown(root_dir: Path) -> str:
 
 
 def parse_pdf(pdf_path: Path, stem: str) -> str:
-    from doctra.parsers.structured_pdf_parser import StructuredPDFParser
+    def read_pdf_text_direct(path: Path) -> str:
+        import fitz  # PyMuPDF
 
-    parser = StructuredPDFParser()
-    parser.parse(str(pdf_path))
-    output_root = Path("outputs") / stem
-    expected = output_root / "full_parse" / "result.md"
-    if expected.exists():
-        return normalize_extracted_text(expected.read_text(encoding="utf-8", errors="ignore"))
-    return read_first_markdown(output_root)
+        chunks: list[str] = []
+        with fitz.open(path) as doc:
+            for page in doc:
+                chunks.append(page.get_text("text") or "")
+        return "\n\n".join(chunks)
+
+    def ocr_pdf_with_doctra(path: Path, max_pages: int = 12, dpi: int = 220) -> str:
+        from doctra.engines.ocr.api import ocr_image
+        from doctra.utils.pdf_io import render_pdf_to_images
+
+        lines: list[str] = []
+        rendered_pages = render_pdf_to_images(str(path), dpi=dpi)
+        for index, page_item in enumerate(rendered_pages):
+            if index >= max_pages:
+                break
+            pil_image = page_item[0].convert("RGB")
+            page_text = ocr_image(pil_image, lang="eng", psm=4, oem=3)
+            if page_text:
+                lines.append(page_text)
+        return "\n\n".join(lines)
+
+    direct_text = normalize_extracted_text(read_pdf_text_direct(pdf_path))
+    if len(direct_text) >= 250:
+        return direct_text
+
+    ocr_text = normalize_extracted_text(ocr_pdf_with_doctra(pdf_path))
+    if len(ocr_text) > len(direct_text):
+        return ocr_text
+    return direct_text
 
 
 def parse_docx(docx_path: Path, stem: str) -> str:
+    def read_docx_text_direct(path: Path) -> str:
+        from docx import Document
+
+        doc = Document(path)
+        lines: list[str] = []
+
+        for paragraph in doc.paragraphs:
+            text = (paragraph.text or "").strip()
+            if text:
+                lines.append(text)
+
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [(cell.text or "").strip() for cell in row.cells]
+                row_text = " | ".join([cell for cell in cells if cell])
+                if row_text:
+                    lines.append(row_text)
+
+        return "\n".join(lines)
+
+    direct_text = normalize_extracted_text(read_docx_text_direct(docx_path))
+    if len(direct_text) >= 120:
+        return direct_text
+
     from doctra.parsers.structured_docx_parser import StructuredDOCXParser
 
     parser = StructuredDOCXParser(
