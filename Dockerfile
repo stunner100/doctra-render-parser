@@ -19,10 +19,10 @@ WORKDIR /app
 COPY . /app
 
 RUN pip install --upgrade pip setuptools wheel && \
+    pip install --extra-index-url https://download.pytorch.org/whl/cpu torch==2.10.0+cpu torchvision==0.25.0+cpu && \
     pip install . && \
     pip install fastapi "uvicorn[standard]" python-multipart
 
 EXPOSE 10000
 
 CMD ["sh", "-c", "uvicorn render_api.app:app --host 0.0.0.0 --port ${PORT:-10000}"]
-
